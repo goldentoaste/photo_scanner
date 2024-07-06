@@ -1,3 +1,5 @@
+from genericpath import isdir, isfile
+import os
 import subprocess
 import sys
 from time import sleep
@@ -44,7 +46,7 @@ class ShellRunner(QThread):
                     # a seperate emit for each emit.
                     self.shellRes.emit((key, line))
 
-        self.shellRes.emit(self.SUCCESS if p.wait() == 0 else self.ERROR)
+        self.shellRes.emit((key, self.SUCCESS if p.wait() == 0 else self.ERROR))
 
 
 class PhotoScanner(QMainWindow, Ui_MainWindow):
@@ -64,9 +66,11 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
 
         self.shellRunner = ShellRunner(self)
         self.lastDir = ""
+        self.fileIndex = 1
 
         # setup gui events
         self.outpathButton.clicked.connect(self.getOutputPath)
+        self.scanBtn.clicked.connect(self.scan)
 
         # setup gui values
         self.shellRunner.shellRes.connect(self.setupScanners)
@@ -81,11 +85,10 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         path = QFileDialog.getExistingDirectory(self, "Select output directory", self.lastDir)
         self.lastDir = path
         self.outpath.setText(self.lastDir)
-        
 
     def checkShell(self, val, target, func):
-
-        if not val or val == ShellRunner.SUCCESS or val == ShellRunner.ERROR:
+        _, value = val
+        if not value or value == ShellRunner.SUCCESS or value == ShellRunner.ERROR:
             self.shellRunner.shellRes.disconnect(func)
             return True
         key, _ = val
@@ -106,11 +109,52 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
             self.printerSelect.setCurrentIndex(0)
         else:
             self.printerSelect.setEditText("N/A")
-            
-    
+
     def scan(self):
+        if not self.outpath.text():
+            self.log("Output path not specified")
+            return
         
-        pass
+        self.log("\n==============\n")
+        
+        targetDir = os.path.join(self.outpath.text(), "scans")
+        
+        # make output path if not exist
+        if not os.path.isdir(targetDir):
+            os.makedirs(targetDir)
+        
+        targetFile = os.path.join(targetDir, f"{self.fileIndex}.jpg")
+        while os.path.isfile(targetFile):
+            self.fileIndex += 1
+            targetFile = os.path.join(targetDir, f"{self.fileIndex}.jpg")
+
+        cmd = f'naps2.console -o "{targetFile}" --noprofile --driver twain --device "{self.printerSelect.currentText()}" --source glass --dpi {self.dpiSelect.currentText()} --pagesize a4 --bitdepth color --jpegquality 100 --progress'
+        self.shellRunner.shellRes.connect(self.finishedScan)
+        self.shellRunner.queueCommand('scan',cmd, False)
+        self.log("Starting Scan...")
+        self.scanBtn.setDisabled(True)
+        
+    
+    def finishedScan(self, result : Tuple[str, str]):
+        key,val = result
+        if key != 'scan':
+            return
+        self.shellRunner.shellRes.disconnect(self.finishedScan)
+        self.setFocus()
+        
+        # expect no extra message during a good scan
+        if val != ShellRunner.SUCCESS:
+            self.log("Error occured during scanning")
+            return
+        
+        targetPath = os.path.join(self.outpath.text(), "scans")
+        targetFile = os.path.join(targetPath, f"{self.fileIndex}.jpg")
+        
+        if not os.path.isfile(targetFile):
+            return self.log(f"Cannot find scanned file: {targetFile}")
+        
+        self.log(f"Scan done: {targetFile}")
+        self.scanBtn.setEnabled(True)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         self.shellRunner.terminate()
