@@ -213,10 +213,12 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
 
         self.log(f"Found {len(good)} images. showing preview for all of them now.")
         for g in good:
-            cv2.imshow("yeah", g)
+            print(g.shape)
+            cv2.imshow("yeah", cv2.resize(g, (600, int(600 * g.shape[0] / g.shape[1])) ))
             cv2.waitKey()
+        cv2.destroyAllWindows()
         self.saveSubImages(good)
-    
+
     def saveSubImages(self, imgs):
         targetPath = self.outpath.text()
         idx = 0
@@ -224,7 +226,7 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         for img in imgs:
             cv2.imwrite(os.path.join(targetPath, f"{self.fileIndex}_{idx}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
             self.log(f"Saved {os.path.join(targetPath, f"{self.fileIndex}_{idx}.jpg")}")
-            
+            idx += 1
 
     def fixRotRect(self, rect):
         if rect[2] > 45:
