@@ -190,6 +190,7 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         return img_crop
 
     def processImage(self, imgPath: str):
+        self.log("scan complete, now finding photos.")
         img = cv2.imread(imgPath)
         blur = cv2.pyrMeanShiftFiltering(img, 11, 21)
 
@@ -208,11 +209,31 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
 
             if cv2.contourArea(minRectPoints, False) > 6000 and (a / b <= 3 and b / a < 3):
                 print(rotatedRect)
-                good.append(self.crop_minAreaRect(img, rotatedRect))
+                good.append(self.crop_minAreaRect(img, self.fixRotRect(rotatedRect)))  # type: ignore
 
+        self.log(f"Found {len(good)} images. showing preview for all of them now.")
         for g in good:
             cv2.imshow("yeah", g)
             cv2.waitKey()
+        self.saveSubImages(good)
+    
+    def saveSubImages(self, imgs):
+        targetPath = self.outpath.text()
+        idx = 0
+        
+        for img in imgs:
+            cv2.imwrite(os.path.join(targetPath, f"{self.fileIndex}_{idx}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
+            self.log(f"Saved {os.path.join(targetPath, f"{self.fileIndex}_{idx}.jpg")}")
+            
+
+    def fixRotRect(self, rect):
+        if rect[2] > 45:
+            return (rect[0], (rect[1][1], rect[1][0]), rect[2] - 90)
+
+        if rect[2] < -45:
+            return (rect[0], (rect[1][1], rect[1][0]), rect[2] + 90)
+
+        return rect
 
     def _processImage(self, imgPath: str):
         img = cv2.imread(imgPath)
