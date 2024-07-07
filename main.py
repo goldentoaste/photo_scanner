@@ -1,13 +1,15 @@
-from genericpath import isdir, isfile
 import os
 import subprocess
 import sys
+from math import sqrt
 from time import sleep
 from typing import List, Tuple
 
+import cv2
+import numpy as np
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QFileDialog
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMainWindow, QWidget
 
 from MainWindow import Ui_MainWindow
 
@@ -114,15 +116,15 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         if not self.outpath.text():
             self.log("Output path not specified")
             return
-        
+
         self.log("\n==============\n")
-        
+
         targetDir = os.path.join(self.outpath.text(), "scans")
-        
+
         # make output path if not exist
         if not os.path.isdir(targetDir):
             os.makedirs(targetDir)
-        
+
         targetFile = os.path.join(targetDir, f"{self.fileIndex}.jpg")
         while os.path.isfile(targetFile):
             self.fileIndex += 1
@@ -130,31 +132,110 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
 
         cmd = f'naps2.console -o "{targetFile}" --noprofile --driver twain --device "{self.printerSelect.currentText()}" --source glass --dpi {self.dpiSelect.currentText()} --pagesize a4 --bitdepth color --jpegquality 100 --progress'
         self.shellRunner.shellRes.connect(self.finishedScan)
-        self.shellRunner.queueCommand('scan',cmd, False)
+        self.shellRunner.queueCommand("scan", cmd, False)
         self.log("Starting Scan...")
         self.scanBtn.setDisabled(True)
-        
-    
-    def finishedScan(self, result : Tuple[str, str]):
-        key,val = result
-        if key != 'scan':
+
+    def finishedScan(self, result: Tuple[str, str]):
+        key, val = result
+        if key != "scan":
             return
         self.shellRunner.shellRes.disconnect(self.finishedScan)
         self.setFocus()
-        
+
         # expect no extra message during a good scan
         if val != ShellRunner.SUCCESS:
             self.log("Error occured during scanning")
+            self.scanBtn.setEnabled(True)
+
             return
-        
+
         targetPath = os.path.join(self.outpath.text(), "scans")
         targetFile = os.path.join(targetPath, f"{self.fileIndex}.jpg")
-        
+
         if not os.path.isfile(targetFile):
             return self.log(f"Cannot find scanned file: {targetFile}")
-        
+
         self.log(f"Scan done: {targetFile}")
+        self.processImage(targetFile)
         self.scanBtn.setEnabled(True)
+
+    def crop_minAreaRect(self, img, rect):
+        # https://stackoverflow.com/a/43099932/12471420
+        # Thanks!
+
+        rows, cols = img.shape[0], img.shape[1]
+        diag = int(sqrt(rows * rows + cols * cols))
+        newimg = np.zeros((diag, diag, 3), dtype=np.uint8)
+
+        rowsOffset = (diag - rows) // 2
+        colsOffset = (diag - cols) // 2
+
+        newimg[rowsOffset : rowsOffset + rows, colsOffset : colsOffset + cols] = img
+        img = newimg
+        # rotate img
+        angle = rect[2]
+        M = cv2.getRotationMatrix2D((diag / 2, diag / 2), angle, 1)
+        img_rot = cv2.warpAffine(img, M, (diag, diag))
+
+        # rotate bounding box
+        rect0 = ((rect[0][0] + colsOffset, rect[0][1] + rowsOffset), rect[1], angle)
+        box = cv2.boxPoints(rect0)
+        pts = np.intp(cv2.transform(np.array([box]), M))[0]  # type: ignore
+        pts[pts < 0] = 0
+
+        # crop
+        img_crop = img_rot[pts[1][1] : pts[0][1], pts[1][0] : pts[2][0]]
+
+        return img_crop
+
+    def processImage(self, imgPath: str):
+        img = cv2.imread(imgPath)
+        blur = cv2.pyrMeanShiftFiltering(img, 11, 21)
+
+        gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 230, 225, cv2.THRESH_BINARY_INV)
+
+        conts = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        conts = conts[0] if len(conts) == 2 else conts[1]
+
+        good = []
+        for c in conts:
+            rotatedRect = cv2.minAreaRect(c)
+            minRectPoints = cv2.boxPoints(rotatedRect)
+            a = rotatedRect[1][0]
+            b = rotatedRect[1][1]
+
+            if cv2.contourArea(minRectPoints, False) > 6000 and (a / b <= 3 and b / a < 3):
+                print(rotatedRect)
+                good.append(self.crop_minAreaRect(img, rotatedRect))
+
+        for g in good:
+            cv2.imshow("yeah", g)
+            cv2.waitKey()
+
+    def _processImage(self, imgPath: str):
+        img = cv2.imread(imgPath)
+        blur = cv2.pyrMeanShiftFiltering(img, 11, 21)
+
+        gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 230, 225, cv2.THRESH_BINARY_INV)
+
+        cv2.imshow("img", binary)
+
+        conts = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        conts = conts[0] if len(conts) == 2 else conts[1]
+
+        good = []
+        for c in conts:
+            rotatedRect = cv2.minAreaRect(c)
+            minRectPoints = cv2.boxPoints(rotatedRect)
+            minRect = np.intp(minRectPoints)
+
+            a = rotatedRect[1][0]
+            b = rotatedRect[1][1]
+            if cv2.contourArea(minRectPoints, False) > 6000 and (a / b <= 3 and b / a < 3):
+                good.append(minRect)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         self.shellRunner.terminate()
@@ -169,5 +250,5 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
 
 if __name__ == "__main__":
     a = QApplication(sys.argv)
-    scanner = PhotoScanner()
+    s = PhotoScanner()
     sys.exit(a.exec())
