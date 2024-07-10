@@ -195,8 +195,11 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         blur = cv2.pyrMeanShiftFiltering(img, 11, 21)
 
         gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 230, 225, cv2.THRESH_BINARY_INV)
-
+        _, binary = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY_INV )
+        
+        cv2.imshow("", cv2.resize(binary, (1200, int(1200 * binary.shape[0] / binary.shape[1]))))
+        cv2.waitKey()
+        
         conts = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         conts = conts[0] if len(conts) == 2 else conts[1]
 
@@ -207,14 +210,14 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
             a = rotatedRect[1][0]
             b = rotatedRect[1][1]
 
-            if cv2.contourArea(minRectPoints, False) > 6000 and (a / b <= 3 and b / a < 3):
+            if cv2.contourArea(minRectPoints, False) > 20000 and (a / b <= 3 and b / a < 3):
                 print(rotatedRect)
                 good.append(self.crop_minAreaRect(img, self.fixRotRect(rotatedRect)))  # type: ignore
 
         self.log(f"Found {len(good)} images. showing preview for all of them now.")
         for g in good:
             print(g.shape)
-            cv2.imshow("yeah", cv2.resize(g, (600, int(600 * g.shape[0] / g.shape[1])) ))
+            cv2.imshow("yeah", cv2.resize(g, (800, int(800 * g.shape[0] / g.shape[1])) ))
             cv2.waitKey()
         cv2.destroyAllWindows()
         self.saveSubImages(good)
