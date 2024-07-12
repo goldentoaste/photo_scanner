@@ -195,7 +195,7 @@ class PhotoScanner(QMainWindow, Ui_MainWindow):
         blur = cv2.pyrMeanShiftFiltering(img, 11, 21)
 
         gray = cv2.cvtColor(blur, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY_INV )
+        _, binary = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY_INV )
         
         cv2.imshow("", cv2.resize(binary, (1200, int(1200 * binary.shape[0] / binary.shape[1]))))
         cv2.waitKey()
